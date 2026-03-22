@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PepsiCo Transportation Services - Transit Calculator</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; padding: 20px; display: flex; flex-direction: column; min-height: 90vh; }
+        
+        .header-logo-container { text-align: center; margin-bottom: 20px; }
+        .header-logo { width: 20%; height: auto; display: block; margin: 0 auto; }
+
+        .container { max-width: 500px; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin: auto; width: 100%; }
+        h2 { color: #004a99; text-align: center; margin-top: 0; margin-bottom: 25px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        label { display: block; margin-top: 15px; font-weight: 600; color: #333; }
+        input { width: 100%; padding: 12px; margin-top: 8px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+        button { background-color: #004a99; color: white; border: none; padding: 15px; width: 100%; margin-top: 25px; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; transition: background 0.3s; }
+        button:hover { background-color: #003366; }
+        
+        #results, #teamSection { margin-top: 25px; padding: 20px; background: #f8f9fa; border-left: 6px solid #004a99; display: none; border-radius: 4px; }
+        #teamSection { border-left-color: #28a745; background: #f0fff4; }
+        
+        .summary-item { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        .total-eta { margin-top: 15px; color: #d93025; font-size: 1.2em; font-weight: bold; text-align: center; }
+        .team-eta { color: #1e7e34; }
+        .loader { text-align: center; display: none; color: #666; font-style: italic; margin-top: 15px; }
+
+        footer { margin-top: 40px; text-align: center; color: #777; font-size: 11px; line-height: 1.6; }
+    </style>
+</head>
+<body>
+
+<div class="header-logo-container">
+    <img src="IMG/PTS.png" alt="PepsiCo Transportation Services" class="header-logo">
+</div>
+
+<div class="container">
+    <h2>PTRA - Logistics Planner Tool</h2>
+    
+    <label>Origin City:</label>
+    <input type="text" id="origin" placeholder="e.g. Dallas, TX">
+
+    <label>Destination City:</label>
+    <input type="text" id="destination" placeholder="e.g. Chicago, IL">
+
+    <button id="calcBtn" onclick="getDistance()">Calculate Route & ETA</button>
+    
+    <div id="loader" class="loader">Fetching road distance...</div>
+
+    <div id="results">
+        <h4 style="margin-top:0; color: #555;">Solo Driver Summary</h4>
+        <div class="summary-item"><span>Total Distance:</span> <strong id="distRes"></strong></div>
+        <div class="summary-item"><span>Net Drive Time:</span> <strong id="driveTime"></strong></div>
+        <div class="summary-item"><span>10hr Sleep Breaks:</span> <strong id="sleepBreaks"></strong></div>
+        <div class="total-eta">Solo ETA: <span id="totalTime"></span></div>
+    </div>
+
+    <div id="teamSection">
+        <h4 style="margin-top:0; color: #1e7e34;">Team Driver Summary (>800 mi)</h4>
+        <p style="font-size: 12px; color: #555; margin-top: -10px;">Continuous operation / No sleep breaks</p>
+        <div class="summary-item"><span>Mandatory 30m Breaks:</span> <strong id="teamShortBreaks"></strong></div>
+        <div class="total-eta team-eta">Team ETA: <span id="teamTotalTime"></span></div>
+    </div>
+</div>
+
+<footer>
+    Based on FMCSA 2026 regulations<br>
+    Built by eduardo.lopez1@pepsico.com
+</footer>
+
+<script>
+async function getDistance() {
+    const origin = document.getElementById('origin').value;
+    const dest = document.getElementById('destination').value;
+    const loader = document.getElementById('loader');
+    
+    if (!origin || !dest) {
+        alert("Please enter both Origin and Destination.");
+        return;
+    }
+
+    loader.style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('teamSection').style.display = 'none';
+
+    try {
+        const geoOrigin = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${origin}`);
+        const dataOrigin = await geoOrigin.json();
+        const geoDest = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${dest}`);
+        const dataDest = await geoDest.json();
+
+        if (dataOrigin.length === 0 || dataDest.length === 0) throw new Error("Locations not found.");
+
+        const lon1 = dataOrigin[0].lon; const lat1 = dataOrigin[0].lat;
+        const lon2 = dataDest[0].lon; const lat2 = dataDest[0].lat;
+
+        const routeReq = await fetch(`https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`);
+        const routeData = await routeReq.json();
+
+        if (routeData.code !== "Ok") throw new Error("Route calculation failed.");
+
+        const distanceMiles = routeData.routes[0].distance * 0.000621371;
+        calculateHOS(distanceMiles);
+
+    } catch (error) {
+        alert("Error: " + error.message);
+    } finally {
+        loader.style.display = 'none';
+    }
+}
+
+function calculateHOS(dist) {
+    const avgSpeed = 52; 
+    const driveTimeHrs = dist / avgSpeed;
+
+    // --- SOLO CALCULATIONS ---
+    const soloShortBreaks = Math.floor(driveTimeHrs / 8);
+    const soloSleepBreaks = Math.floor(driveTimeHrs / 11);
+    const soloTotalHours = driveTimeHrs + (soloShortBreaks * 0.5) + (soloSleepBreaks * 10);
+
+    // Update Solo UI
+    document.getElementById('results').style.display = 'block';
+    document.getElementById('distRes').innerText = Math.round(dist) + " miles";
+    document.getElementById('driveTime').innerText = driveTimeHrs.toFixed(1) + " hrs";
+    document.getElementById('sleepBreaks').innerText = soloSleepBreaks;
+    
+    const soloD = Math.floor(soloTotalHours / 24);
+    const soloH = (soloTotalHours % 24).toFixed(1);
+    document.getElementById('totalTime').innerText = soloD > 0 ? `${soloD}d ${soloH}h` : `${soloH} hrs`;
+
+    // --- TEAM CALCULATIONS (Only if > 800 miles) ---
+    if (dist > 800) {
+        const teamShortBreaks = Math.floor(driveTimeHrs / 8); 
+        // No sleep breaks, but we keep the 30-min mandatory breaks every 8hrs of operation
+        const teamTotalHours = driveTimeHrs + (teamShortBreaks * 0.5);
+
+        document.getElementById('teamSection').style.display = 'block';
+        document.getElementById('teamShortBreaks').innerText = teamShortBreaks;
+        
+        const teamD = Math.floor(teamTotalHours / 24);
+        const teamH = (teamTotalHours % 24).toFixed(1);
+        document.getElementById('teamTotalTime').innerText = teamD > 0 ? `${teamD}d ${teamH}h` : `${teamH} hrs`;
+    }
+}
+</script>
+
+</body>
+</html>
